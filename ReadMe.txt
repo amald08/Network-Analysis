@@ -1,6 +1,2 @@
-Due to some difficulties with plotting
-and visualization of the network, two outputs are given.
+Project made for the Complex Networks course of the Master in Stochastics and Data Science, University of Turin
 
-One html file where it is easier to see the figures and
-one pdf file with more article format but with
-blank spaces due to the size of the figures.
