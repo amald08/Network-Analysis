@@ -1,0 +1,264 @@
+---
+title: "Analyzing Corruption Networks in Football"
+subtitle: "Univeristà degli Studi di Torino"
+author: "Adrián Maldonado Hernández"
+date: "July 2021"
+output: 
+  html_document:
+    number_sections: true
+# classoption:
+#   twocolumn
+fontsize: 12pt
+
+abstract: "Corruption has been a long-standing problem in many aspects of our lives, from governments to sports associations, it behaves like a virus very difficult to control. In this case, with network analysis tools, we study how corruption networks inside the FIFA administration could have been built and their main characteristics."
+
+bibliography: references.bib
+
+nocite: |
+  @CorrComplex, @CNetChina, @peeters2019social, @dataset, @Fraud20062,
+  @Fraud2006, @Fraud2015
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(fig.align = 'center')
+rm(list = ls())
+
+current_path = rstudioapi::getActiveDocumentContext()$path 
+setwd(dirname(current_path))
+
+library(igraph)
+library(tidyverse)
+library(ggplot2)
+library(GGally)
+library(knitr)
+library(poweRlaw)
+# library(kableExtra)
+
+# knitr::opts_chunk$set(fig.height = 9, fig.width = 7)
+
+fifa_dir = paste0(dirname(current_path),'/FIFA CSV/CSV')
+
+pretty_plot = function(A, title = '', alpha = 1, color = 'maroon4'){
+  ggnet2(A, 
+       size = 'degree',
+       size.cut = 10,
+       shape = 20,
+       node.color = color,
+       edge.color = 'grey4',
+       alpha = alpha,
+       edge.size = 1,
+       edge.alpha = 1-1/E(A)$weight + .2,
+       legend.position = 'bottom') +
+  theme(plot.background = element_rect(fill = 'gray70'),
+        legend.background = element_rect(fill = 'gray40')) +
+  labs(title = title)
+
+}
+
+char_network = function(A){
+  dist = distances(A)
+  mean_d = mean_distance(A, directed = F, unconnected = T)
+  b = lower.tri(dist)
+  d_histogram = hist(dist[b], plot = F)
+  
+  deg = degree(A)
+  mdeg = mean(deg)
+  sdeg = sd(deg)
+  
+  ccoeff = transitivity(A)
+  big_comp = clusters(A)$csize[1]
+  no_comp = clusters(A)$no
+  ass = assortativity_degree(A)
+  
+  centdeg = centr_degree(A)$res
+  centeigen = centr_eigen(A)$vector
+  centbetw = centr_betw(A)$res
+  
+  names = c('Mean Distance', 'Mean Degree', 
+            'SD Degree', 'Clustering Coefficient',
+            'Size of Biggest Component', 'Number of Components',
+            'Assortativity')
+  measures = data.frame(rbind(mean_d, 
+                       mdeg, sdeg, ccoeff, 
+                       big_comp, no_comp,
+                       ass), row.names = names)
+  colnames(measures) = 'Measures'
+  
+  centrality_n = c('Centrality Degree', 'Eigen-Centrality', 
+                   'Betweenness Centrality')
+  centrality = data.frame(rbind(centdeg, centeigen, centbetw), 
+                          row.names = centrality_n)
+  colnames(centrality) = V(A)$name
+  
+  res = list(Measures = measures, Histogram = d_histogram, 
+             Degree = deg, Centrality =  centrality)
+
+  return(res)
+}
+```
+
+# Motivation
+
+As it is known for most football fans, the FIFA, main football association in the world, has been involved in several corruption scandals in the last years. With high ranking officers as well as local actors being involved it is not clear how intricate these networks are. In this case by studying the assistance to different congresses around the world we analyze how these networks are built, their characteristics and in the future we could try to classify or find the likelihood of an individual to be involved in one of these scandals.
+
+
+# Data
+
+We use data of assistance to congresses in 2006 and 2015, the graphs are undirected with a weight representing in how many occasions two individuals attended the same event. In 2006 we have 340 nodes (individuals) with 3328 edges, for 2015 the network grows to 450 nodes with 5022 edges.
+
+```{r data}
+setwd(fifa_dir)
+
+fifa_2006 = read.csv('2006_FIFA_1M.csv')
+m2006 = as.matrix(fifa_2006[,2:dim(fifa_2006)[2]])
+fifa_2015 = read.csv('2015_FIFA_1M.csv')
+m2015 = as.matrix(fifa_2015[,2:dim(fifa_2015)[2]])
+
+g2006 = graph_from_adjacency_matrix(m2006,'undirected', diag = F, weighted = T)
+g2015 = graph_from_adjacency_matrix(m2015,'undirected', diag = F, weighted = T)
+```
+
+# First Look
+
+```{r plot1}
+set.seed(1)
+
+pretty_plot(g2006, 'FIFA 2006',.8)
+
+pretty_plot(g2015, 'FIFA 2015',.8)
+```
+
+Both datasets present similarities as expected, however the separate networks were not expected. It is strange that these sets of people haven't been in touch with the other ones and it can be interesting to study why or what type of congress they attended. 
+
+In the two cases it is more interesting to analyze the *main* component. After showing the communities, which are not easy to see due to the size of the network, we show some interesting measures of the global networks before jumping to the *main* components.
+
+```{r Communities1}
+set.seed(1)
+C06 = cluster_louvain(g2006)
+plot(C06,g2006, vertex.size = 1, vertex.label = NA, main = 'Communities 2006')
+
+C15 = cluster_louvain(g2015)
+plot(C15,g2015, vertex.size = 1, vertex.label = NA, main = 'Communities 2015')
+# A[1] # players
+# A[8] # corruption
+```
+
+A quick analysis of the communities show us that they do share many characteristics, for the 2006 there are two important communities, one of retired players and one of high ranking officials that have been involved in corruption scandals. The same goes for the 2015 case.
+
+Since the networks are similar they will be studied at the same time.
+
+```{r first analysis}
+X = char_network(g2006)
+Y = char_network(g2015)
+
+kable(X$Measures, caption = 'Important Measures, FIFA 2006')
+kable(Y$Measures, caption = 'Important Measures, FIFA 2015')
+```
+
+The mean distance of the connected components is almost the same and small, meaning that even if two individuals haven't been together, we can find people in common in almost every case. As expected the mean degree is very high, however with the standard deviation we see that it's range is wide. In both cases the clustering coefficient is relatively high, which can bee seen in the biggest component, this is one of the reasons that makes the network hard to visualize in a pretty way. As noted, having different components was not expected.
+
+The assortativity, although low, shows us that they are positively related in terms of the degree of the nodes. Homophily here was not possible to analyze since there is no data to be used for this purpose; nevertheless knowing about football and how the confederations are formed high homophily is expected.
+
+The centralities will be analyzed in a better way when we get to the biggest component, right now it would lead to similar results.
+
+Lastly we take a look at the distributions of the degree.
+
+```{r dist degree}
+
+plot(density(X$Degree), main = 'Density of the Degree, 2006')
+plot(density(Y$Degree), main = 'Density of the Degree, 2015')
+# degree_distribution(g2006)
+```
+
+After looking at the density of the degree in both cases we try to verify if they follow a power law with the poweRlaw package. The null hypothesis is that the data is generated from a power law distribution.
+
+```{r powerLaw 1}
+
+m = displ$new(X$Degree)
+a = estimate_xmin(m)
+m$setXmin(a$xmin); m$setPars(a$pars)
+plot(m, col = 'blue', main = 'Fitting a Power Law to the Degree, 2006')
+lines(m, col=2)
+bs_p = bootstrap_p(m, threads = 2)
+bs_p$p
+
+m = displ$new(Y$Degree)
+a = estimate_xmin(m)
+m$setXmin(a$xmin); m$setPars(a$pars)
+plot(m, col = 'blue', main = 'Fitting a Power Law to the Degree, 2015')
+lines(m, col=2)
+bs_p = bootstrap_p(m, threads = 2)
+bs_p$p
+```
+
+Using the p-value we say that in the 2006 case, the distribution of the degree doesn't follow a power law, thus not scale free. A fit hasn't been found for this distribution. However things change for the 2015 case, where it seems to follow a power law and be in the scale free regime.
+
+
+Now we move to study the biggest component of each network.
+
+# Biggest components
+
+The biggest component of the 2006 network has 307 nodes and 3070 edges, while the 2015 one has 414 nodes with 4805 edges. The other components were not contributing to our analysis, individuals in those components were all related to each other. It seems that those cases were unique events where all the people involved attended just that one. 
+
+```{r decomp}
+dg06<-decompose.graph(g2006)
+dg15<-decompose.graph(g2015)
+
+X1 = char_network(dg06[[1]])
+Y1 = char_network(dg15[[1]])
+```
+
+Now, plotting just the components we are interested in, we can take a better look at the structure of the network.
+
+```{r plot2}
+pretty_plot(dg06[[1]], 'FIFA 2006, Main Component',.8)
+pretty_plot(dg15[[1]], 'FIFA 2015, Main Component',.8)
+```
+
+At first sight it seems that there are many well separated communities, but the most interesting thing will be to analyze the centralities, since in the corruption investigation we would be interested in the main actors of it, one could have some big names in mind, but the goal is to recognize less known actors.
+
+```{r Communities2}
+set.seed(1)
+C06 = cluster_louvain(dg06[[1]])
+plot(C06,dg06[[1]], vertex.size = 1, vertex.label = NA, main = 'Communities 2006')
+
+C15 = cluster_louvain(dg15[[1]])
+plot(C15,dg15[[1]], vertex.size = 1, vertex.label = NA, main = 'Communities 2015')
+
+```
+
+The communities look prettier this time, however due to the density of the network it is still hard to distinguish them, ordering the network in a different way is complicated due to certain central actors, which will be shown later.
+
+Taking a look at some important measures we see that removing the isolated components did not affect much, the mean degree has a slight increase in both cases, the clustering coefficients remain high and the assortativity positive.
+
+```{r second analysis}
+kable(X1$Measures, caption = 'Important Measures, FIFA 2006 Main Component')
+kable(Y1$Measures, caption = 'Important Measures, FIFA 2015 Main Component')
+```
+
+
+We calculate three different centrality measures: centrality degree, eigen-centrality and betweenness centrality, this way there are different options to take into account.
+
+
+```{r Centralities}
+kable(list(sort(t(X1$Centrality)[,1], decreasing = T)[1:5], 
+           sort(t(X1$Centrality)[,2], decreasing = T)[1:5],
+           sort(t(X1$Centrality)[,3], decreasing = T)[1:5]), 
+      caption = 'Centrality Measures 2006')
+
+kable(list(sort(t(Y1$Centrality)[,1], decreasing = T)[1:5], 
+           sort(t(Y1$Centrality)[,2], decreasing = T)[1:5],
+           sort(t(Y1$Centrality)[,3], decreasing = T)[1:5]), 
+      caption = 'Centrality Measures 2015')
+```
+
+In both cases the three different measures are consistent, presenting few discrepancies. If we wanted to continue the corruption investigation using this set of tools, all of the individuals that appear in the above tables would be persons of interest.
+
+# Final comments 
+
+Handling this type of networks is a hard task, even with not that many edges or nodes the manipulation can be very complicated. The interactions inside the studied networks could give a lot of information if we were investigating the corruption cases, tracing paths and relationships, with additional information would be extremely useful. 
+
+In the future, with additional information, if we consider corruption to be a disease an epidemics model could be use together with taking the *covert network* approach for the analysis to find missing links.
+
+# References
